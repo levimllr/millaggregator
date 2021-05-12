@@ -1,7 +1,7 @@
 package com.levimllr.millaggregator.aggregator;
 
-import org.springframework.data.repository.CrudRepository;
+import org.springframework.data.repository.PagingAndSortingRepository;
 
-public interface AggregatorRepository extends CrudRepository<Aggregator, Long> {
+public interface AggregatorRepository extends PagingAndSortingRepository<Aggregator, Long> {
 
 }
