@@ -34104,6 +34104,8 @@ var React = __webpack_require__(/*! react */ "./node_modules/react/index.js");
 
 var ReactDOM = __webpack_require__(/*! react-dom */ "./node_modules/react-dom/index.js");
 
+var when = __webpack_require__(/*! when */ "./node_modules/when/when.js");
+
 var client = __webpack_require__(/*! ./client */ "./src/main/js/client.js");
 
 var follow = __webpack_require__(/*! ./follow */ "./src/main/js/follow.js"); // function to hop multiple links by "rel"
@@ -34130,6 +34132,7 @@ var App = /*#__PURE__*/function (_React$Component) {
     };
     _this.updatePageSize = _this.updatePageSize.bind(_assertThisInitialized(_this));
     _this.onCreate = _this.onCreate.bind(_assertThisInitialized(_this));
+    _this.onUpdate = _this.onUpdate.bind(_assertThisInitialized(_this));
     _this.onDelete = _this.onDelete.bind(_assertThisInitialized(_this));
     _this.onNavigate = _this.onNavigate.bind(_assertThisInitialized(_this));
     return _this;
@@ -34141,12 +34144,14 @@ var App = /*#__PURE__*/function (_React$Component) {
     value: function loadFromServer(pageSize) {
       var _this2 = this;
 
-      follow(client, root, [{
+      follow(client, root, [// <1>
+      {
         rel: 'aggregators',
         params: {
           size: pageSize
         }
       }]).then(function (aggregatorCollection) {
+        // <2>
         return client({
           method: 'GET',
           path: aggregatorCollection.entity._links.profile.href,
@@ -34155,14 +34160,27 @@ var App = /*#__PURE__*/function (_React$Component) {
           }
         }).then(function (schema) {
           _this2.schema = schema.entity;
+          _this2.links = aggregatorCollection.entity._links;
           return aggregatorCollection;
         });
-      }).done(function (aggregatorCollection) {
+      }).then(function (aggregatorCollection) {
+        // <3>
+        return aggregatorCollection.entity._embedded.aggregators.map(function (aggregator) {
+          return client({
+            method: 'GET',
+            path: aggregator._links.self.href
+          });
+        });
+      }).then(function (aggregatorPromises) {
+        // <4>
+        return when.all(aggregatorPromises);
+      }).done(function (aggregators) {
+        // <5>
         _this2.setState({
-          aggregators: aggregatorCollection.entity._embedded.aggregators,
+          aggregators: aggregators,
           attributes: Object.keys(_this2.schema.properties),
           pageSize: pageSize,
-          links: aggregatorCollection.entity._links
+          links: _this2.links
         });
       });
     } // end::follow-2[]
@@ -34170,14 +34188,15 @@ var App = /*#__PURE__*/function (_React$Component) {
 
   }, {
     key: "onCreate",
-    value: function onCreate(newAggregator) {
+    value: function onCreate(newaggregator) {
       var _this3 = this;
 
-      follow(client, root, ['aggregators']).then(function (aggregatorCollection) {
+      var self = this;
+      follow(client, root, ['aggregators']).then(function (response) {
         return client({
           method: 'POST',
-          path: aggregatorCollection.entity._links.self.href,
-          entity: newAggregator,
+          path: response.entity._links.self.href,
+          entity: newaggregator,
           headers: {
             'Content-Type': 'application/json'
           }
@@ -34186,7 +34205,7 @@ var App = /*#__PURE__*/function (_React$Component) {
         return follow(client, root, [{
           rel: 'aggregators',
           params: {
-            'size': _this3.state.pageSize
+            'size': self.state.pageSize
           }
         }]);
       }).done(function (response) {
@@ -34197,18 +34216,41 @@ var App = /*#__PURE__*/function (_React$Component) {
         }
       });
     } // end::create[]
+    // tag::update[]
+
+  }, {
+    key: "onUpdate",
+    value: function onUpdate(aggregator, updatedaggregator) {
+      var _this4 = this;
+
+      client({
+        method: 'PUT',
+        path: aggregator.entity._links.self.href,
+        entity: updatedaggregator,
+        headers: {
+          'Content-Type': 'application/json',
+          'If-Match': aggregator.headers.Etag
+        }
+      }).done(function (response) {
+        _this4.loadFromServer(_this4.state.pageSize);
+      }, function (response) {
+        if (response.status.code === 412) {
+          alert('DENIED: Unable to update ' + aggregator.entity._links.self.href + '. Your copy is stale.');
+        }
+      });
+    } // end::update[]
     // tag::delete[]
 
   }, {
     key: "onDelete",
     value: function onDelete(aggregator) {
-      var _this4 = this;
+      var _this5 = this;
 
       client({
         method: 'DELETE',
-        path: aggregator._links.self.href
+        path: aggregator.entity._links.self.href
       }).done(function (response) {
-        _this4.loadFromServer(_this4.state.pageSize);
+        _this5.loadFromServer(_this5.state.pageSize);
       });
     } // end::delete[]
     // tag::navigate[]
@@ -34216,17 +34258,27 @@ var App = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "onNavigate",
     value: function onNavigate(navUri) {
-      var _this5 = this;
+      var _this6 = this;
 
       client({
         method: 'GET',
         path: navUri
-      }).done(function (aggregatorCollection) {
-        _this5.setState({
-          aggregators: aggregatorCollection.entity._embedded.aggregators,
-          attributes: _this5.state.attributes,
-          pageSize: _this5.state.pageSize,
-          links: aggregatorCollection.entity._links
+      }).then(function (aggregatorCollection) {
+        _this6.links = aggregatorCollection.entity._links;
+        return aggregatorCollection.entity._embedded.aggregators.map(function (aggregator) {
+          return client({
+            method: 'GET',
+            path: aggregator._links.self.href
+          });
+        });
+      }).then(function (aggregatorPromises) {
+        return when.all(aggregatorPromises);
+      }).done(function (aggregators) {
+        _this6.setState({
+          aggregators: aggregators,
+          attributes: Object.keys(_this6.schema.properties),
+          pageSize: _this6.state.pageSize,
+          links: _this6.links
         });
       });
     } // end::navigate[]
@@ -34257,7 +34309,9 @@ var App = /*#__PURE__*/function (_React$Component) {
         aggregators: this.state.aggregators,
         links: this.state.links,
         pageSize: this.state.pageSize,
+        attributes: this.state.attributes,
         onNavigate: this.onNavigate,
+        onUpdate: this.onUpdate,
         onDelete: this.onDelete,
         updatePageSize: this.updatePageSize
       }));
@@ -34274,31 +34328,29 @@ var CreateDialog = /*#__PURE__*/function (_React$Component2) {
   var _super2 = _createSuper(CreateDialog);
 
   function CreateDialog(props) {
-    var _this6;
+    var _this7;
 
     _classCallCheck(this, CreateDialog);
 
-    _this6 = _super2.call(this, props);
-    _this6.handleSubmit = _this6.handleSubmit.bind(_assertThisInitialized(_this6));
-    return _this6;
+    _this7 = _super2.call(this, props);
+    _this7.handleSubmit = _this7.handleSubmit.bind(_assertThisInitialized(_this7));
+    return _this7;
   }
 
   _createClass(CreateDialog, [{
     key: "handleSubmit",
     value: function handleSubmit(e) {
-      var _this7 = this;
+      var _this8 = this;
 
       e.preventDefault();
-      var newAggregator = {};
+      var newaggregator = {};
       this.props.attributes.forEach(function (attribute) {
-        newAggregator[attribute] = ReactDOM.findDOMNode(_this7.refs[attribute]).value.trim();
+        newaggregator[attribute] = ReactDOM.findDOMNode(_this8.refs[attribute]).value.trim();
       });
-      this.props.onCreate(newAggregator); // clear out the dialog's inputs
-
+      this.props.onCreate(newaggregator);
       this.props.attributes.forEach(function (attribute) {
-        ReactDOM.findDOMNode(_this7.refs[attribute]).value = '';
-      }); // Navigate away from the dialog to hide it.
-
+        ReactDOM.findDOMNode(_this8.refs[attribute]).value = ''; // clear out the dialog's inputs
+      });
       window.location = "#";
     }
   }, {
@@ -34315,9 +34367,9 @@ var CreateDialog = /*#__PURE__*/function (_React$Component2) {
         }));
       });
       return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("a", {
-        href: "#createAggregator"
+        href: "#createaggregator"
       }, "Create"), /*#__PURE__*/React.createElement("div", {
-        id: "createAggregator",
+        id: "createaggregator",
         className: "modalDialog"
       }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("a", {
         href: "#",
@@ -34331,25 +34383,93 @@ var CreateDialog = /*#__PURE__*/function (_React$Component2) {
 
   return CreateDialog;
 }(React.Component); // end::create-dialog[]
+// tag::update-dialog[]
 
 
-var AggregatorList = /*#__PURE__*/function (_React$Component3) {
-  _inherits(AggregatorList, _React$Component3);
+var UpdateDialog = /*#__PURE__*/function (_React$Component3) {
+  _inherits(UpdateDialog, _React$Component3);
 
-  var _super3 = _createSuper(AggregatorList);
+  var _super3 = _createSuper(UpdateDialog);
+
+  function UpdateDialog(props) {
+    var _this9;
+
+    _classCallCheck(this, UpdateDialog);
+
+    _this9 = _super3.call(this, props);
+    _this9.handleSubmit = _this9.handleSubmit.bind(_assertThisInitialized(_this9));
+    return _this9;
+  }
+
+  _createClass(UpdateDialog, [{
+    key: "handleSubmit",
+    value: function handleSubmit(e) {
+      var _this10 = this;
+
+      e.preventDefault();
+      var updatedaggregator = {};
+      this.props.attributes.forEach(function (attribute) {
+        updatedaggregator[attribute] = ReactDOM.findDOMNode(_this10.refs[attribute]).value.trim();
+      });
+      this.props.onUpdate(this.props.aggregator, updatedaggregator);
+      window.location = "#";
+    }
+  }, {
+    key: "render",
+    value: function render() {
+      var _this11 = this;
+
+      var inputs = this.props.attributes.map(function (attribute) {
+        return /*#__PURE__*/React.createElement("p", {
+          key: _this11.props.aggregator.entity[attribute]
+        }, /*#__PURE__*/React.createElement("input", {
+          type: "text",
+          placeholder: attribute,
+          defaultValue: _this11.props.aggregator.entity[attribute],
+          ref: attribute,
+          className: "field"
+        }));
+      });
+      var dialogId = "updateaggregator-" + this.props.aggregator.entity._links.self.href;
+      return /*#__PURE__*/React.createElement("div", {
+        key: this.props.aggregator.entity._links.self.href
+      }, /*#__PURE__*/React.createElement("a", {
+        href: "#" + dialogId
+      }, "Update"), /*#__PURE__*/React.createElement("div", {
+        id: dialogId,
+        className: "modalDialog"
+      }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("a", {
+        href: "#",
+        title: "Close",
+        className: "close"
+      }, "X"), /*#__PURE__*/React.createElement("h2", null, "Update an aggregator"), /*#__PURE__*/React.createElement("form", null, inputs, /*#__PURE__*/React.createElement("button", {
+        onClick: this.handleSubmit
+      }, "Update")))));
+    }
+  }]);
+
+  return UpdateDialog;
+}(React.Component);
+
+; // end::update-dialog[]
+
+var AggregatorList = /*#__PURE__*/function (_React$Component4) {
+  _inherits(AggregatorList, _React$Component4);
+
+  var _super4 = _createSuper(AggregatorList);
 
   function AggregatorList(props) {
-    var _this8;
+    var _this12;
 
     _classCallCheck(this, AggregatorList);
 
-    _this8 = _super3.call(this, props);
-    _this8.handleNavFirst = _this8.handleNavFirst.bind(_assertThisInitialized(_this8));
-    _this8.handleNavPrev = _this8.handleNavPrev.bind(_assertThisInitialized(_this8));
-    _this8.handleNavNext = _this8.handleNavNext.bind(_assertThisInitialized(_this8));
-    _this8.handleNavLast = _this8.handleNavLast.bind(_assertThisInitialized(_this8));
-    _this8.handleInput = _this8.handleInput.bind(_assertThisInitialized(_this8));
-    return _this8;
+    _this12 = _super4.call(this, props);
+    _this12.handleNavFirst = _this12.handleNavFirst.bind(_assertThisInitialized(_this12));
+    _this12.handleNavPrev = _this12.handleNavPrev.bind(_assertThisInitialized(_this12));
+    _this12.handleNavNext = _this12.handleNavNext.bind(_assertThisInitialized(_this12));
+    _this12.handleNavLast = _this12.handleNavLast.bind(_assertThisInitialized(_this12));
+    _this12.handleInput = _this12.handleInput.bind(_assertThisInitialized(_this12));
+    return _this12;
   } // tag::handle-page-size-updates[]
 
 
@@ -34396,13 +34516,15 @@ var AggregatorList = /*#__PURE__*/function (_React$Component3) {
   }, {
     key: "render",
     value: function render() {
-      var _this9 = this;
+      var _this13 = this;
 
       var aggregators = this.props.aggregators.map(function (aggregator) {
         return /*#__PURE__*/React.createElement(Aggregator, {
-          key: aggregator._links.self.href,
+          key: aggregator.entity._links.self.href,
           aggregator: aggregator,
-          onDelete: _this9.props.onDelete
+          attributes: _this13.props.attributes,
+          onUpdate: _this13.props.onUpdate,
+          onDelete: _this13.props.onDelete
         });
       });
       var navLinks = [];
@@ -34439,7 +34561,7 @@ var AggregatorList = /*#__PURE__*/function (_React$Component3) {
         ref: "pageSize",
         defaultValue: this.props.pageSize,
         onInput: this.handleInput
-      }), /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("tbody", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Name"), /*#__PURE__*/React.createElement("th", null)), aggregators)), /*#__PURE__*/React.createElement("div", null, navLinks));
+      }), /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("tbody", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Name"), /*#__PURE__*/React.createElement("th", null), /*#__PURE__*/React.createElement("th", null)), aggregators)), /*#__PURE__*/React.createElement("div", null, navLinks));
     } // end::aggregator-list-render[]
 
   }]);
@@ -34448,19 +34570,19 @@ var AggregatorList = /*#__PURE__*/function (_React$Component3) {
 }(React.Component); // tag::aggregator[]
 
 
-var Aggregator = /*#__PURE__*/function (_React$Component4) {
-  _inherits(Aggregator, _React$Component4);
+var Aggregator = /*#__PURE__*/function (_React$Component5) {
+  _inherits(Aggregator, _React$Component5);
 
-  var _super4 = _createSuper(Aggregator);
+  var _super5 = _createSuper(Aggregator);
 
   function Aggregator(props) {
-    var _this10;
+    var _this14;
 
     _classCallCheck(this, Aggregator);
 
-    _this10 = _super4.call(this, props);
-    _this10.handleDelete = _this10.handleDelete.bind(_assertThisInitialized(_this10));
-    return _this10;
+    _this14 = _super5.call(this, props);
+    _this14.handleDelete = _this14.handleDelete.bind(_assertThisInitialized(_this14));
+    return _this14;
   }
 
   _createClass(Aggregator, [{
@@ -34471,7 +34593,11 @@ var Aggregator = /*#__PURE__*/function (_React$Component4) {
   }, {
     key: "render",
     value: function render() {
-      return /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", null, this.props.aggregator.name), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("button", {
+      return /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", null, this.props.aggregator.entity.name), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement(UpdateDialog, {
+        aggregator: this.props.aggregator,
+        attributes: this.props.attributes,
+        onUpdate: this.props.onUpdate
+      })), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("button", {
         onClick: this.handleDelete
       }, "Delete")));
     }

@@ -2,6 +2,7 @@
 
 const React = require('react');
 const ReactDOM = require('react-dom');
+const when = require('when');
 const client = require('./client');
 
 const follow = require('./follow'); // function to hop multiple links by "rel"
@@ -15,45 +16,57 @@ class App extends React.Component {
 		this.state = {aggregators: [], attributes: [], pageSize: 2, links: {}};
 		this.updatePageSize = this.updatePageSize.bind(this);
 		this.onCreate = this.onCreate.bind(this);
+		this.onUpdate = this.onUpdate.bind(this);
 		this.onDelete = this.onDelete.bind(this);
 		this.onNavigate = this.onNavigate.bind(this);
 	}
 
 	// tag::follow-2[]
 	loadFromServer(pageSize) {
-		follow(client, root, [
+		follow(client, root, [ // <1>
 			{rel: 'aggregators', params: {size: pageSize}}]
-		).then(aggregatorCollection => {
+		).then(aggregatorCollection => { // <2>
 			return client({
 				method: 'GET',
 				path: aggregatorCollection.entity._links.profile.href,
 				headers: {'Accept': 'application/schema+json'}
 			}).then(schema => {
 				this.schema = schema.entity;
+				this.links = aggregatorCollection.entity._links;
 				return aggregatorCollection;
 			});
-		}).done(aggregatorCollection => {
+		}).then(aggregatorCollection => { // <3>
+			return aggregatorCollection.entity._embedded.aggregators.map(aggregator =>
+					client({
+						method: 'GET',
+						path: aggregator._links.self.href
+					})
+			);
+		}).then(aggregatorPromises => { // <4>
+			return when.all(aggregatorPromises);
+		}).done(aggregators => { // <5>
 			this.setState({
-				aggregators: aggregatorCollection.entity._embedded.aggregators,
+				aggregators: aggregators,
 				attributes: Object.keys(this.schema.properties),
 				pageSize: pageSize,
-				links: aggregatorCollection.entity._links});
+				links: this.links
+			});
 		});
 	}
 	// end::follow-2[]
 
 	// tag::create[]
-	onCreate(newAggregator) {
-		follow(client, root, ['aggregators']).then(aggregatorCollection => {
+	onCreate(newaggregator) {
+		const self = this;
+		follow(client, root, ['aggregators']).then(response => {
 			return client({
 				method: 'POST',
-				path: aggregatorCollection.entity._links.self.href,
-				entity: newAggregator,
+				path: response.entity._links.self.href,
+				entity: newaggregator,
 				headers: {'Content-Type': 'application/json'}
 			})
 		}).then(response => {
-			return follow(client, root, [
-				{rel: 'aggregators', params: {'size': this.state.pageSize}}]);
+			return follow(client, root, [{rel: 'aggregators', params: {'size': self.state.pageSize}}]);
 		}).done(response => {
 			if (typeof response.entity._links.last !== "undefined") {
 				this.onNavigate(response.entity._links.last.href);
@@ -64,9 +77,30 @@ class App extends React.Component {
 	}
 	// end::create[]
 
+	// tag::update[]
+	onUpdate(aggregator, updatedaggregator) {
+		client({
+			method: 'PUT',
+			path: aggregator.entity._links.self.href,
+			entity: updatedaggregator,
+			headers: {
+				'Content-Type': 'application/json',
+				'If-Match': aggregator.headers.Etag
+			}
+		}).done(response => {
+			this.loadFromServer(this.state.pageSize);
+		}, response => {
+			if (response.status.code === 412) {
+				alert('DENIED: Unable to update ' +
+					aggregator.entity._links.self.href + '. Your copy is stale.');
+			}
+		});
+	}
+	// end::update[]
+
 	// tag::delete[]
 	onDelete(aggregator) {
-		client({method: 'DELETE', path: aggregator._links.self.href}).done(response => {
+		client({method: 'DELETE', path: aggregator.entity._links.self.href}).done(response => {
 			this.loadFromServer(this.state.pageSize);
 		});
 	}
@@ -74,12 +108,26 @@ class App extends React.Component {
 
 	// tag::navigate[]
 	onNavigate(navUri) {
-		client({method: 'GET', path: navUri}).done(aggregatorCollection => {
+		client({
+			method: 'GET',
+			path: navUri
+		}).then(aggregatorCollection => {
+			this.links = aggregatorCollection.entity._links;
+
+			return aggregatorCollection.entity._embedded.aggregators.map(aggregator =>
+					client({
+						method: 'GET',
+						path: aggregator._links.self.href
+					})
+			);
+		}).then(aggregatorPromises => {
+			return when.all(aggregatorPromises);
+		}).done(aggregators => {
 			this.setState({
-				aggregators: aggregatorCollection.entity._embedded.aggregators,
-				attributes: this.state.attributes,
+				aggregators: aggregators,
+				attributes: Object.keys(this.schema.properties),
 				pageSize: this.state.pageSize,
-				links: aggregatorCollection.entity._links
+				links: this.links
 			});
 		});
 	}
@@ -106,7 +154,9 @@ class App extends React.Component {
 				<AggregatorList aggregators={this.state.aggregators}
 							  links={this.state.links}
 							  pageSize={this.state.pageSize}
+							  attributes={this.state.attributes}
 							  onNavigate={this.onNavigate}
+							  onUpdate={this.onUpdate}
 							  onDelete={this.onDelete}
 							  updatePageSize={this.updatePageSize}/>
 			</div>
@@ -124,18 +174,14 @@ class CreateDialog extends React.Component {
 
 	handleSubmit(e) {
 		e.preventDefault();
-		const newAggregator = {};
+		const newaggregator = {};
 		this.props.attributes.forEach(attribute => {
-			newAggregator[attribute] = ReactDOM.findDOMNode(this.refs[attribute]).value.trim();
+			newaggregator[attribute] = ReactDOM.findDOMNode(this.refs[attribute]).value.trim();
 		});
-		this.props.onCreate(newAggregator);
-
-		// clear out the dialog's inputs
+		this.props.onCreate(newaggregator);
 		this.props.attributes.forEach(attribute => {
-			ReactDOM.findDOMNode(this.refs[attribute]).value = '';
+			ReactDOM.findDOMNode(this.refs[attribute]).value = ''; // clear out the dialog's inputs
 		});
-
-		// Navigate away from the dialog to hide it.
 		window.location = "#";
 	}
 
@@ -145,12 +191,11 @@ class CreateDialog extends React.Component {
 				<input type="text" placeholder={attribute} ref={attribute} className="field"/>
 			</p>
 		);
-
 		return (
 			<div>
-				<a href="#createAggregator">Create</a>
+				<a href="#createaggregator">Create</a>
 
-				<div id="createAggregator" className="modalDialog">
+				<div id="createaggregator" className="modalDialog">
 					<div>
 						<a href="#" title="Close" className="close">X</a>
 
@@ -165,9 +210,60 @@ class CreateDialog extends React.Component {
 			</div>
 		)
 	}
-
 }
 // end::create-dialog[]
+
+// tag::update-dialog[]
+class UpdateDialog extends React.Component {
+
+	constructor(props) {
+		super(props);
+		this.handleSubmit = this.handleSubmit.bind(this);
+	}
+
+	handleSubmit(e) {
+		e.preventDefault();
+		const updatedaggregator = {};
+		this.props.attributes.forEach(attribute => {
+			updatedaggregator[attribute] = ReactDOM.findDOMNode(this.refs[attribute]).value.trim();
+		});
+		this.props.onUpdate(this.props.aggregator, updatedaggregator);
+		window.location = "#";
+	}
+
+	render() {
+		const inputs = this.props.attributes.map(attribute =>
+			<p key={this.props.aggregator.entity[attribute]}>
+				<input type="text" placeholder={attribute}
+					   defaultValue={this.props.aggregator.entity[attribute]}
+					   ref={attribute} className="field"/>
+			</p>
+		);
+
+		const dialogId = "updateaggregator-" + this.props.aggregator.entity._links.self.href;
+
+		return (
+			<div key={this.props.aggregator.entity._links.self.href}>
+				<a href={"#" + dialogId}>Update</a>
+				<div id={dialogId} className="modalDialog">
+					<div>
+						<a href="#" title="Close" className="close">X</a>
+
+						<h2>Update an aggregator</h2>
+
+						<form>
+							{inputs}
+							<button onClick={this.handleSubmit}>Update</button>
+						</form>
+					</div>
+				</div>
+			</div>
+		)
+	}
+
+};
+// end::update-dialog[]
+
 
 class AggregatorList extends React.Component {
 
@@ -187,8 +283,7 @@ class AggregatorList extends React.Component {
 		if (/^[0-9]+$/.test(pageSize)) {
 			this.props.updatePageSize(pageSize);
 		} else {
-			ReactDOM.findDOMNode(this.refs.pageSize).value =
-				pageSize.substring(0, pageSize.length - 1);
+			ReactDOM.findDOMNode(this.refs.pageSize).value = pageSize.substring(0, pageSize.length - 1);
 		}
 	}
 	// end::handle-page-size-updates[]
@@ -198,27 +293,27 @@ class AggregatorList extends React.Component {
 		e.preventDefault();
 		this.props.onNavigate(this.props.links.first.href);
 	}
-
 	handleNavPrev(e) {
 		e.preventDefault();
 		this.props.onNavigate(this.props.links.prev.href);
 	}
-
 	handleNavNext(e) {
 		e.preventDefault();
 		this.props.onNavigate(this.props.links.next.href);
 	}
-
 	handleNavLast(e) {
 		e.preventDefault();
 		this.props.onNavigate(this.props.links.last.href);
 	}
 	// end::handle-nav[]
-
 	// tag::aggregator-list-render[]
 	render() {
 		const aggregators = this.props.aggregators.map(aggregator =>
-			<Aggregator key={aggregator._links.self.href} aggregator={aggregator} onDelete={this.props.onDelete}/>
+			<Aggregator key={aggregator.entity._links.self.href}
+					  aggregator={aggregator}
+					  attributes={this.props.attributes}
+					  onUpdate={this.props.onUpdate}
+					  onDelete={this.props.onDelete}/>
 		);
 
 		const navLinks = [];
@@ -242,6 +337,7 @@ class AggregatorList extends React.Component {
 					<tbody>
 						<tr>
 							<th>Name</th>
+							<th></th>
 							<th></th>
 						</tr>
 						{aggregators}
@@ -271,7 +367,12 @@ class Aggregator extends React.Component {
 	render() {
 		return (
 			<tr>
-				<td>{this.props.aggregator.name}</td>
+				<td>{this.props.aggregator.entity.name}</td>
+				<td>
+					<UpdateDialog aggregator={this.props.aggregator}
+								  attributes={this.props.attributes}
+								  onUpdate={this.props.onUpdate}/>
+				</td>
 				<td>
 					<button onClick={this.handleDelete}>Delete</button>
 				</td>
