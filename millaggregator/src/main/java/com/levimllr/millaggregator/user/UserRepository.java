@@ -1,7 +1,12 @@
 package com.levimllr.millaggregator.user;
 
-import org.springframework.data.repository.CrudRepository;
+import org.springframework.data.repository.Repository;
+import org.springframework.data.rest.core.annotation.RepositoryRestResource;
 
-public interface UserRepository extends CrudRepository<User, Long> {
+@RepositoryRestResource(exported = false)
+public interface UserRepository extends Repository<User, Long> {
 
+    User save(User user);
+
+    User findByEmail(String email);
 }
