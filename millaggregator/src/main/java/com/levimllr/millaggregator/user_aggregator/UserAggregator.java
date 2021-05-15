@@ -19,7 +19,6 @@ public class UserAggregator {
     private @ManyToOne Aggregator aggregator;
     private String role;
 
-
     private UserAggregator() {};
 
     @JsonCreator
@@ -42,13 +41,42 @@ public class UserAggregator {
         return user;
     }
 
+    public void setUser(User user) {
+        this.user = user;
+    }
+
     @JsonGetter("aggregator")
     public Aggregator getAggregatorId() {
         return aggregator;
     }
 
-    @JsonGetter("role")
+    @JsonGetter("roles")
     public String getRole() {
         return role;
+    }
+
+    public static class Builder {
+        private User user;
+        private Aggregator aggregator;
+        private String role;
+
+        public Builder withUser(User user) {
+            this.user = user;
+            return this;
+        }
+
+        public Builder withAggregator(Aggregator aggregator) {
+            this.aggregator = aggregator;
+            return this;
+        }
+
+        public Builder withRole(String role) {
+            this.role = role;
+            return this;
+        }
+
+        public UserAggregator build() {
+            return new UserAggregator(user, aggregator, role);
+        }
     }
 }

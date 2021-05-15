@@ -7,15 +7,16 @@ import org.springframework.security.access.prepost.PreAuthorize;
 @PreAuthorize("hasRole('ROLE_OWNER')")
 public interface AggregatorRepository extends PagingAndSortingRepository<Aggregator, Long> {
 
+    // TO-DO: FIGURE OUT HOW TO SEARCH FOR USER WITH EMAIL THAT MATCHES AUTHENTICATION PRINCIPAL
     @Override
-    @PreAuthorize("#aggregator?.user == null or #aggregator?.user?.name == authentication?.name")
+    @PreAuthorize("#aggregator?.userAggregators == null or #aggregator?.userAggregators?.^[user.email == #authentication?.principal] != null")
     Aggregator save(@Param("aggregator") Aggregator aggregator);
 
     @Override
-    @PreAuthorize("@aggregatorRepository.findById(#id)?.user?.name == authentication?name")
+    @PreAuthorize("@aggregatorRepository.findById(#id)?.userAggregators?.^[user.email]?.user?.email == #authentication?.principal")
     void deleteById(Long aLong);
 
     @Override
-    @PreAuthorize("#aggregator?.user?.name == #authentication?.name")
+    @PreAuthorize("#aggregator?.userAggregators?.^[user.email == #authentication?.principal]")
     void delete(Aggregator aggregator);
 }
