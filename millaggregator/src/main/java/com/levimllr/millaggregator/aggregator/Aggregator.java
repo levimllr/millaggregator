@@ -14,7 +14,7 @@ public class Aggregator {
 
     private @Id @GeneratedValue Long id;
     private String name;
-    private @OneToMany @JsonIgnore List<UserAggregator> userAggregators;
+    private @OneToMany(mappedBy = "aggregator", cascade = CascadeType.ALL) @JsonIgnore List<UserAggregator> userAggregators;
 
     private @Version @JsonIgnore Long version;
 

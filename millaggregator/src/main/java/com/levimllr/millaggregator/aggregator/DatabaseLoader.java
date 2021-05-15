@@ -48,7 +48,7 @@ public class DatabaseLoader implements CommandLineRunner {
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("emaldives@example.com", "PASSWORD",
-                        AuthorityUtils.createAuthorityList("ROLE_OWNER")));
+                        AuthorityUtils.createAuthorityList("ROLE_USER")));
 
         User dbUser = userRepository.save(user);
         userAggregator.setUser(dbUser);
