@@ -1,5 +1,13 @@
 # Millaggregator Design Doc
 
+## Features
+
+1. Digestable, actionable financials tracking
+2. Contextual ticket presentation
+3. Commonplace rendering of `/worklife`
+4. Sleep rating
+5. Apple Exercise data / Myfitnesspal data summary
+
 ## Who, What, When, Where, How, Why
 
 ### Who is the Millaggregator for?
