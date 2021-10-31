@@ -103,7 +103,7 @@ Table containing data for weekly windows of time to default to for display of ce
 | `id`          | `INTEGER` | Primary key.                                        |
 | `start_time`  | `TIME`    | Describes the start time.                           |
 | `end_time`    | `TIME`    | Describes the end time.                             |
-| `sundday`     | `TINYINT` | Whether or not this window exists during Sunday.    |
+| `sunday`      | `TINYINT` | Whether or not this window exists during Sunday.    |
 | `monday`      | `TINYINT` | Whether or not this window exists during Monday.    |
 | `tuesday`     | `TINYINT` | Whether or not this window exists during Tuesday.   |
 | `wednesday`   | `TINYINT` | Whether or not this window exists during Wednesday. |
